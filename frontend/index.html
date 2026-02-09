@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Free MCQ Quiz Generator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Settings Page -->
+    <section id="step-settings" class="card">
+      <div class="header-text">
+        <p class="subtitle">or upload a PDF and let AI do the rest</p>
+      </div>
+
+      <!-- Content Source Selection -->
+      <div class="section-group">
+        <label class="section-label">Content Source</label>
+        <div class="button-group">
+          <button id="source-url" class="source-btn active" data-source="url">
+            <span class="icon">🔗</span>
+            Article URL
+          </button>
+          <button id="source-pdf" class="source-btn" data-source="pdf">
+            <span class="icon">📄</span>
+            Upload PDF
+          </button>
+        </div>
+        
+        <!-- URL Input -->
+        <div id="url-input-group" class="input-group">
+          <div class="input-wrapper">
+            <span class="input-icon">🔗</span>
+            <input id="url-input" type="url" placeholder="https://example.com/article" />
+          </div>
+          <button id="extract-url" class="btn-extract">Extract</button>
+        </div>
+
+        <!-- PDF Upload -->
+        <div id="pdf-input-group" class="input-group hidden">
+          <div id="pdf-drop" class="dropzone">
+            <span class="drop-icon">📄</span>
+            <p>Click to choose a PDF, or drop it here</p>
+            <input id="pdf-file" type="file" accept="application/pdf" hidden />
+          </div>
+          <p id="pdf-filename" class="filename"></p>
+          <button id="extract-pdf" class="btn-extract">Extract</button>
+        </div>
+
+        <p id="extract-status" class="status-text"></p>
+      </div>
+
+      <!-- Number of Questions -->
+      <div class="section-group">
+        <label class="section-label">Number of Questions</label>
+        <div class="button-group">
+          <button class="qty-btn" data-qty="5">5</button>
+          <button class="qty-btn active" data-qty="10">10</button>
+          <button class="qty-btn" data-qty="15">15</button>
+          <button class="qty-btn" data-qty="20">20</button>
+        </div>
+      </div>
+
+      <!-- Difficulty Level -->
+      <div class="section-group">
+        <label class="section-label">Difficulty Level</label>
+        <div class="difficulty-group">
+          <button class="difficulty-btn" data-difficulty="easy">
+            <div class="difficulty-title">Easy</div>
+            <div class="difficulty-desc">Straightforward recall questions</div>
+          </button>
+          <button class="difficulty-btn active" data-difficulty="medium">
+            <div class="difficulty-title">Medium</div>
+            <div class="difficulty-desc">Requires understanding concepts</div>
+          </button>
+          <button class="difficulty-btn" data-difficulty="hard">
+            <div class="difficulty-title">Hard</div>
+            <div class="difficulty-desc">Analytical & tricky questions</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Generate Button -->
+      <button id="generate-quiz" class="btn-generate">
+        <span class="sparkle">✨</span>
+        Generate Quiz
+      </button>
+      <p id="generate-status" class="status-text"></p>
+
+      <p class="footer-note">Questions are generated using AI based on the article content</p>
+    </section>
+
+    <!-- Quiz Page (One Question at a Time) -->
+    <section id="step-quiz" class="card hidden">
+      <div class="quiz-header">
+        <div class="progress-info">
+          <span id="question-counter">Question 1 of 10</span>
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+        </div>
+        <div class="answered-counter">
+          <span id="answered-count">0</span> answered
+        </div>
+      </div>
+
+      <div class="question-container">
+        <div id="question-text" class="question-text"></div>
+        
+        <div id="options-container" class="options-container">
+          <!-- Options will be inserted here -->
+        </div>
+      </div>
+
+      <div class="quiz-actions">
+        <button id="prev-question" class="btn-nav" disabled>← Previous</button>
+        <button id="next-question" class="btn-nav">Next →</button>
+        <button id="submit-quiz" class="btn-submit hidden">Submit Quiz</button>
+      </div>
+    </section>
+
+    <!-- Results Page -->
+    <section id="step-results" class="card hidden">
+      <h2 class="results-title">Quiz Results</h2>
+      
+      <div class="score-display">
+        <div class="score-circle">
+          <span id="score-percentage">0%</span>
+        </div>
+        <div class="score-info">
+          <p id="score-line" class="score-text">Score: 0 / 0</p>
+          <p id="score-message" class="score-message"></p>
+        </div>
+      </div>
+
+      <div class="share-section">
+        <label class="section-label">Share this quiz</label>
+        <div class="share-row">
+          <input id="share-link" type="text" readonly />
+          <button id="copy-link" class="btn-copy">Copy</button>
+        </div>
+      </div>
+
+      <button id="results-new-quiz" class="btn-generate">Create Another Quiz</button>
+    </section>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
