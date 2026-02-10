@@ -25,5 +25,7 @@ WORKDIR /app/backend
 # Expose port (Railway will set PORT env var)
 EXPOSE 8000
 
-# Run the application
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# IMPORTANT:
+# Use an ENTRYPOINT script so the container starts reliably even if the platform
+# overrides the "command" (which can cause `cd`-related failures).
+ENTRYPOINT ["/bin/sh", "/app/backend/start.sh"]
