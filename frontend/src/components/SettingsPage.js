@@ -3,6 +3,9 @@ import './SettingsPage.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
+// Debug: Log API base URL
+console.log('API_BASE:', API_BASE || 'Using relative URLs');
+
 function SettingsPage({ onQuizGenerated }) {
   const [sourceType, setSourceType] = useState('url');
   const [url, setUrl] = useState('');
@@ -41,9 +44,20 @@ function SettingsPage({ onQuizGenerated }) {
         });
       }
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Extraction failed');
+      // Check if response is ok and has content
+      if (!res.ok) {
+        const errorText = await res.text();
+        let errorMsg;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMsg = errorJson.detail || 'Extraction failed';
+        } catch {
+          errorMsg = errorText || `Server error: ${res.status}`;
+        }
+        throw new Error(errorMsg);
+      }
 
+      const data = await res.json();
       return data.content;
     } catch (err) {
       setStatus({ text: String(err), type: 'error' });
@@ -72,12 +86,33 @@ function SettingsPage({ onQuizGenerated }) {
         }),
       });
 
+      // Check if response is ok and has content
+      if (!res.ok) {
+        const errorText = await res.text();
+        let errorMsg;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMsg = errorJson.detail || 'Quiz generation failed';
+        } catch {
+          errorMsg = errorText || `Server error: ${res.status}. Check if backend is running and Ollama is configured.`;
+        }
+        throw new Error(errorMsg);
+      }
+
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Quiz generation failed');
+      if (!data.quiz_id || !data.questions) {
+        throw new Error('Invalid response from server');
+      }
 
       onQuizGenerated(data.quiz_id, data.questions);
     } catch (err) {
-      setStatus({ text: `${String(err)}. Ensure Ollama is running.`, type: 'error' });
+      let errorMsg = String(err);
+      if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+        errorMsg = `Cannot connect to backend. Check if ${API_BASE || 'backend'} is running.`;
+      } else if (errorMsg.includes('Unexpected end of JSON')) {
+        errorMsg = 'Backend returned invalid response. Check backend logs.';
+      }
+      setStatus({ text: errorMsg, type: 'error' });
     } finally {
       setIsGenerating(false);
     }
