@@ -225,12 +225,17 @@ Open your browser at:
 - To change the LLM model or base URL, set environment variables before starting FastAPI:
 
   ```bash
+  export LLM_PROVIDER=huggingface
+  export HUGGINGFACE_API_TOKEN=your_hf_token
+  export HUGGINGFACE_MODEL=google/flan-t5-base
+  ```
+
+- For local Ollama instead, use:
+  ```bash
+  export LLM_PROVIDER=ollama
   export OLLAMA_MODEL=llama3
   export OLLAMA_BASE_URL=http://localhost:11434
   ```
-
-- If you want to swap in a different local LLM stack (e.g. HuggingFace Transformers),
-  extend `LLMService` and keep the same `generate_questions()` interface.
 
 ---
 
@@ -238,4 +243,3 @@ Open your browser at:
 
 This project is intended to be fully open‑source and free to run locally. You can adapt it as a boilerplate
 for your own quiz generators or other document‑to‑question pipelines using only local models.
-

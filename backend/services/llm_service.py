@@ -5,7 +5,14 @@ from typing import Any, Dict, List
 
 import requests
 
-from config import LLM_PROVIDER, OLLAMA_BASE_URL, OLLAMA_MODEL
+from config import (
+    HUGGINGFACE_API_TOKEN,
+    HUGGINGFACE_API_URL,
+    HUGGINGFACE_MODEL,
+    LLM_PROVIDER,
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+)
 
 
 class LLMService:
@@ -22,8 +29,10 @@ class LLMService:
     ) -> List[Dict[str, Any]]:
         if self.provider == "ollama":
             raw = self._call_ollama(content, num_questions, difficulty)
+        elif self.provider == "huggingface":
+            raw = self._call_huggingface(content, num_questions, difficulty)
         else:
-            raise RuntimeError("Only 'ollama' provider is implemented in this template.")
+            raise RuntimeError("Unsupported LLM provider. Use 'ollama' or 'huggingface'.")
 
         return self._parse_questions(raw, expected=num_questions)
 
@@ -96,6 +105,45 @@ Source text:
         data = resp.json()
         return data.get("response", "")
 
+    def _call_huggingface(self, content: str, num_questions: int, difficulty: str) -> str:
+        prompt = self._build_prompt(content, num_questions, difficulty)
+        url = f"{HUGGINGFACE_API_URL.rstrip('/')}/{HUGGINGFACE_MODEL}"
+        headers = {"Content-Type": "application/json"}
+        if HUGGINGFACE_API_TOKEN:
+            headers["Authorization"] = f"Bearer {HUGGINGFACE_API_TOKEN}"
+
+        payload: Dict[str, Any] = {
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": max(512, num_questions * 180),
+                "temperature": 0.3,
+                "return_full_text": False,
+            },
+        }
+
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=300)
+        except Exception as exc:  # pragma: no cover - network error
+            raise RuntimeError("Failed to reach Hugging Face inference endpoint.") from exc
+
+        if resp.status_code >= 400:
+            detail = resp.text[:500]
+            raise RuntimeError(f"Hugging Face API error: {resp.status_code} {detail}")
+
+        data = resp.json()
+        if isinstance(data, list) and data:
+            first = data[0]
+            if isinstance(first, dict):
+                if "generated_text" in first:
+                    return str(first["generated_text"])
+        if isinstance(data, dict):
+            if "generated_text" in data:
+                return str(data["generated_text"])
+            if "error" in data:
+                raise RuntimeError(f"Hugging Face inference error: {data['error']}")
+
+        raise RuntimeError("Unexpected response format from Hugging Face inference API.")
+
     def _parse_questions(self, raw: str, expected: int) -> List[Dict[str, Any]]:
         # Try to locate JSON
         start = raw.find("{")
@@ -143,4 +191,3 @@ Source text:
             raise RuntimeError("No valid questions parsed from LLM output.")
 
         return normalised[:expected]
-

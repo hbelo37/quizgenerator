@@ -252,8 +252,10 @@ vercel --prod
 
 ### Backend:
 - `PORT` (auto-set by hosting)
-- `LLM_PROVIDER` (optional, defaults to "ollama")
-- `OLLAMA_BASE_URL` (if using Ollama, set to localhost or your Ollama server)
+- `LLM_PROVIDER` (optional, defaults to "huggingface")
+- `HUGGINGFACE_API_TOKEN` (recommended for Hugging Face free inference)
+- `HUGGINGFACE_MODEL` (optional, defaults to `google/flan-t5-base`)
+- `OLLAMA_BASE_URL` (only if using Ollama)
 
 ### Frontend:
 - `REACT_APP_API_BASE` (your backend URL)

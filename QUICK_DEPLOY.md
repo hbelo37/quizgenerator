@@ -92,10 +92,10 @@ nixpacks build .
 Make sure these are set in Railway:
 
 - `PORT` - Auto-set by Railway
-- `LLM_PROVIDER` - Set to `ollama` or `openai_compatible`
-- `OLLAMA_BASE_URL` - If using Ollama (won't work on Railway free tier)
-- `OPENAI_API_BASE` - If using Groq/OpenAI-compatible API
-- `OPENAI_API_KEY` - Your API key
+- `LLM_PROVIDER` - Set to `huggingface` (recommended on Railway) or `ollama`
+- `HUGGINGFACE_API_TOKEN` - Your Hugging Face token (free tier works)
+- `HUGGINGFACE_MODEL` - Optional model id (default: `google/flan-t5-base`)
+- `OLLAMA_BASE_URL` - Only if using Ollama
 
 ---
 

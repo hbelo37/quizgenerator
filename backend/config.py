@@ -14,9 +14,12 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 # LLM configuration
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "huggingface"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "huggingface")  # "ollama" or "huggingface"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral")  # e.g. "mistral", "llama3"
+HUGGINGFACE_API_URL = os.getenv("HUGGINGFACE_API_URL", "https://api-inference.huggingface.co/models")
+HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", "google/flan-t5-base")
+HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN", "")
 
 # Quiz settings
 MIN_QUESTIONS = 5
@@ -25,4 +28,3 @@ DIFFICULTIES = ["easy", "medium", "hard"]
 
 # Upload constraints
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
-
