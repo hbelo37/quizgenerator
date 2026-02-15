@@ -70,7 +70,7 @@ function SettingsPage({ onQuizGenerated }) {
     if (!content) return;
 
     setIsGenerating(true);
-    setStatus({ text: 'Generating quiz with local LLM... this may take a minute.', type: 'info' });
+    setStatus({ text: 'Generating quiz, it may take a minute...', type: 'info' });
 
     try {
       const res = await fetch(`${API_BASE}/generate-quiz`, {

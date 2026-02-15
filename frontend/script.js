@@ -172,7 +172,7 @@ async function generateQuiz() {
   const difficulty = difficultyBtn?.getAttribute("data-difficulty") || "medium";
   const numQuestions = parseInt(qtyBtn?.getAttribute("data-qty") || "10");
 
-  setGenerateStatus("Generating quiz with local LLM… this may take a minute.", "info");
+  setGenerateStatus("Generating quiz, it may take a minute...", "info");
   $("generate-quiz").disabled = true;
 
   try {
