@@ -48,18 +48,36 @@ class LLMService:
                     raw = self._call_ollama(content, num_questions, difficulty, hint)
                 else:
                     raw = self._call_huggingface(content, num_questions, difficulty, hint)
-
-                parsed = self._parse_questions(raw, expected=num_questions)
-                validated = self._validate_questions(parsed, content, expected=num_questions)
-                if len(validated) >= num_questions:
-                    return validated[:num_questions]
-                last_error = (
-                    f"Model returned insufficient high-quality questions "
-                    f"({len(validated)}/{num_questions})."
-                )
             except RuntimeError as exc:
                 last_error = str(exc)
                 continue
+
+            # First try direct parse, then force JSON repair if needed.
+            parse_errors: List[str] = []
+            candidates = [raw]
+            try:
+                repaired = self._repair_to_json(raw, num_questions)
+                if repaired and repaired.strip():
+                    candidates.append(repaired)
+            except RuntimeError as exc:
+                parse_errors.append(str(exc))
+
+            for candidate in candidates:
+                try:
+                    parsed = self._parse_questions(candidate, expected=num_questions)
+                    validated = self._validate_questions(parsed, content, expected=num_questions)
+                    if len(validated) >= num_questions:
+                        return validated[:num_questions]
+                    last_error = (
+                        f"Model returned insufficient high-quality questions "
+                        f"({len(validated)}/{num_questions})."
+                    )
+                except RuntimeError as exc:
+                    parse_errors.append(str(exc))
+                    continue
+
+            if parse_errors:
+                last_error = parse_errors[-1]
 
         raise RuntimeError(
             f"Failed to generate acceptable quiz questions from model output. {last_error}"
@@ -182,6 +200,7 @@ Source text:
                 ],
                 "temperature": 0.3,
                 "max_tokens": max(512, num_questions * 180),
+                "response_format": {"type": "json_object"},
             }
             resp = requests.post(chat_url, headers=headers, json=chat_payload, timeout=300)
         except Exception as exc:  # pragma: no cover - network error
@@ -526,6 +545,7 @@ Input:
                 "messages": [{"role": "user", "content": repair_prompt}],
                 "temperature": 0.1,
                 "max_tokens": max(512, expected * 160),
+                "response_format": {"type": "json_object"},
             }
             resp = requests.post(chat_url, headers=headers, json=payload, timeout=180)
             if resp.status_code >= 400:
