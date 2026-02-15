@@ -133,7 +133,7 @@ function SettingsPage({ onQuizGenerated }) {
   return (
     <div className="settings-card">
       <div className="header-text">
-        <p className="subtitle">or upload a PDF and let AI do the rest</p>
+        <p className="subtitle">Turn any PDF or link into a ready-to-use quiz in seconds.</p>
       </div>
 
       {/* Content Source */}
