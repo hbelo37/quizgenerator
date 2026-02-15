@@ -29,41 +29,49 @@ class LLMService:
         num_questions: int,
         difficulty: str,
     ) -> List[Dict[str, Any]]:
-        if self.provider == "ollama":
-            raw = self._call_ollama(content, num_questions, difficulty)
-        elif self.provider == "huggingface":
-            raw = self._call_huggingface(content, num_questions, difficulty)
-        else:
+        if self.provider not in ("ollama", "huggingface"):
             raise RuntimeError("Unsupported LLM provider. Use 'ollama' or 'huggingface'.")
 
-        try:
-            parsed = self._parse_questions(raw, expected=num_questions)
-            if len(parsed) < num_questions:
-                parsed.extend(
-                    self._build_fallback_questions(
-                        content,
-                        num_questions - len(parsed),
-                        difficulty=difficulty,
-                    )
-                )
-            return parsed[:num_questions]
-        except RuntimeError:
-            try:
-                repaired = self._repair_to_json(raw, num_questions)
-                parsed = self._parse_questions(repaired, expected=num_questions)
-                if len(parsed) < num_questions:
-                    parsed.extend(
-                        self._build_fallback_questions(
-                            content,
-                            num_questions - len(parsed),
-                            difficulty=difficulty,
-                        )
-                    )
-                return parsed[:num_questions]
-            except RuntimeError:
-                return self._build_fallback_questions(content, num_questions, difficulty=difficulty)
+        retry_hints = [
+            "",
+            "Retry: Your previous response was invalid or low quality. Return strict JSON only.",
+            (
+                "Retry: Generate exactly the required count. Ensure every question is distinct, "
+                "non-repetitive, and strictly grounded in the provided text."
+            ),
+        ]
 
-    def _build_prompt(self, content: str, num_questions: int, difficulty: str) -> str:
+        last_error = "Unknown generation failure."
+        for hint in retry_hints:
+            try:
+                if self.provider == "ollama":
+                    raw = self._call_ollama(content, num_questions, difficulty, hint)
+                else:
+                    raw = self._call_huggingface(content, num_questions, difficulty, hint)
+
+                parsed = self._parse_questions(raw, expected=num_questions)
+                validated = self._validate_questions(parsed, content, expected=num_questions)
+                if len(validated) >= num_questions:
+                    return validated[:num_questions]
+                last_error = (
+                    f"Model returned insufficient high-quality questions "
+                    f"({len(validated)}/{num_questions})."
+                )
+            except RuntimeError as exc:
+                last_error = str(exc)
+                continue
+
+        raise RuntimeError(
+            f"Failed to generate acceptable quiz questions from model output. {last_error}"
+        )
+
+    def _build_prompt(
+        self,
+        content: str,
+        num_questions: int,
+        difficulty: str,
+        retry_hint: str = "",
+    ) -> str:
         difficulty = difficulty.lower()
         if difficulty == "easy":
             difficulty_instructions = (
@@ -95,6 +103,8 @@ Rules:
 - For EASY: no trick wording, no negations like "NOT", single-fact recall.
 - For MEDIUM: include paraphrase/inference, not direct copy of one sentence.
 - For HARD: require combining at least two ideas from different parts of the text.
+- All questions must be distinct. Do not repeat the same idea.
+- Avoid generic stems like "Which statement is true?" unless tied to specific context.
 
 Return ONLY valid JSON, nothing else. The JSON must have this exact shape:
 {{
@@ -109,12 +119,15 @@ Return ONLY valid JSON, nothing else. The JSON must have this exact shape:
 Do not wrap JSON in markdown fences.
 Do not add explanations before or after JSON.
 `correct_answer` must be one of: "A", "B", "C", "D".
+{retry_hint}
 
 Source text:
 \"\"\"{truncated}\"\"\""""
 
-    def _call_ollama(self, content: str, num_questions: int, difficulty: str) -> str:
-        prompt = self._build_prompt(content, num_questions, difficulty)
+    def _call_ollama(
+        self, content: str, num_questions: int, difficulty: str, retry_hint: str = ""
+    ) -> str:
+        prompt = self._build_prompt(content, num_questions, difficulty, retry_hint)
         url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
         try:
             resp = requests.post(
@@ -138,8 +151,10 @@ Source text:
         data = resp.json()
         return data.get("response", "")
 
-    def _call_huggingface(self, content: str, num_questions: int, difficulty: str) -> str:
-        prompt = self._build_prompt(content, num_questions, difficulty)
+    def _call_huggingface(
+        self, content: str, num_questions: int, difficulty: str, retry_hint: str = ""
+    ) -> str:
+        prompt = self._build_prompt(content, num_questions, difficulty, retry_hint)
         base_url = HUGGINGFACE_API_URL.rstrip("/")
         # Hugging Face migrated from api-inference.huggingface.co to router.huggingface.co.
         if "api-inference.huggingface.co" in base_url:
@@ -280,6 +295,51 @@ Source text:
             raise RuntimeError("No valid questions parsed from LLM output.")
 
         return normalised[:expected]
+
+    def _validate_questions(
+        self, questions: List[Dict[str, Any]], content: str, expected: int
+    ) -> List[Dict[str, Any]]:
+        content_lower = content.lower()
+        seen_question_keys = set()
+        validated: List[Dict[str, Any]] = []
+
+        for q in questions:
+            question = str(q.get("question", "")).strip()
+            options = q.get("options") or []
+            correct_letter = str(q.get("correct_answer", "A")).upper()
+
+            if not question or not isinstance(options, list) or len(options) != 4:
+                continue
+            if correct_letter not in ("A", "B", "C", "D"):
+                continue
+
+            q_key = re.sub(r"\s+", " ", question.lower())
+            if q_key in seen_question_keys:
+                continue
+            seen_question_keys.add(q_key)
+
+            correct_idx = {"A": 0, "B": 1, "C": 2, "D": 3}[correct_letter]
+            correct_text = str(options[correct_idx]).strip()
+            if not correct_text:
+                continue
+
+            # Grounding check: correct option should substantially overlap with source text.
+            tokens = re.findall(r"[a-z0-9]{4,}", correct_text.lower())
+            overlap = [t for t in tokens if t in content_lower]
+            if tokens and (len(overlap) / len(tokens)) < 0.35:
+                continue
+
+            validated.append(
+                {
+                    "question": question,
+                    "options": [str(o).strip() for o in options],
+                    "correct_answer": correct_letter,
+                }
+            )
+            if len(validated) >= expected:
+                break
+
+        return validated
 
     def _normalise_options(self, raw_options: Any) -> List[str]:
         if raw_options is None:
@@ -482,86 +542,3 @@ Input:
             raise RuntimeError("Hugging Face repair failed: unexpected response format.")
 
         raise RuntimeError("Unsupported LLM provider for repair step.")
-
-    def _build_fallback_questions(self, content: str, expected: int, difficulty: str) -> List[Dict[str, Any]]:
-        """Build proper MCQ-style questions from source statements."""
-        normalized = " ".join(content.split())
-        raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", normalized) if s.strip()]
-        facts = [s for s in raw_sentences if len(s.split()) >= 8 and 50 <= len(s) <= 220]
-        if len(facts) < 2:
-            raise RuntimeError("Unable to generate fallback quiz questions.")
-
-        permutations = [
-            [0, 1, 2, 3],  # A
-            [1, 0, 2, 3],  # B
-            [1, 2, 0, 3],  # C
-            [1, 2, 3, 0],  # D
-        ]
-        diff = (difficulty or "medium").lower().strip()
-        if diff not in ("easy", "medium", "hard"):
-            diff = "medium"
-
-        def topic_from_sentence(sentence: str) -> str:
-            words = re.findall(r"\b[A-Za-z][A-Za-z0-9\-]{3,}\b", sentence)
-            if not words:
-                return "the passage"
-            return " ".join(words[:3])
-
-        def mutate_false(statement: str, variant: int) -> str:
-            s = statement.rstrip(".")
-            if diff == "easy":
-                if variant == 0:
-                    return f"The passage does not discuss this point: {s}."
-                if variant == 1 and " is " in s:
-                    return s.replace(" is ", " was ", 1) + "."
-                return f"The passage states the opposite of this claim: {s}."
-            if diff == "hard":
-                if variant == 0:
-                    return f"{s}. However, this ignores the broader context in the passage."
-                if variant == 1:
-                    return f"{s}. This conclusion conflicts with another key detail in the text."
-                return f"{s}. This overstates what the passage actually supports."
-            if variant == 0:
-                return f"{s}. This is only partially supported by the passage."
-            if variant == 1:
-                return f"{s}. This misses an important condition from the text."
-            return f"{s}. This interpretation is weaker than the best-supported claim."
-
-        questions: List[Dict[str, Any]] = []
-        n = len(facts)
-        for idx in range(expected):
-            correct = facts[idx % n]
-            topic = topic_from_sentence(correct)
-
-            if diff == "easy":
-                stem = f"According to the passage, which statement about {topic} is correct?"
-            elif diff == "hard":
-                stem = f"Which option is best supported by the passage when evaluating claims about {topic}?"
-            else:
-                stem = f"Based on the passage, which claim about {topic} is most accurate?"
-
-            distractors: List[str] = []
-            for jump in range(1, n + 1):
-                candidate = facts[(idx + jump) % n]
-                if candidate != correct and candidate not in distractors:
-                    distractors.append(candidate)
-                if len(distractors) == 2:
-                    break
-            while len(distractors) < 2:
-                distractors.append(mutate_false(correct, len(distractors)))
-
-            distractors.append(mutate_false(correct, 2))
-            base_options = [correct, distractors[0], distractors[1], distractors[2]]
-            order = permutations[idx % len(permutations)]
-            options = [base_options[i] for i in order]
-            correct_index = order.index(0)
-
-            questions.append(
-                {
-                    "question": stem,
-                    "options": options,
-                    "correct_answer": ["A", "B", "C", "D"][correct_index],
-                }
-            )
-
-        return questions
