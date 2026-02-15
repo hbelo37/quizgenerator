@@ -484,95 +484,84 @@ Input:
         raise RuntimeError("Unsupported LLM provider for repair step.")
 
     def _build_fallback_questions(self, content: str, expected: int, difficulty: str) -> List[Dict[str, Any]]:
-        """Build quiz-style cloze MCQs directly from the provided text."""
+        """Build proper MCQ-style questions from source statements."""
         normalized = " ".join(content.split())
         raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", normalized) if s.strip()]
-        sentences = [s for s in raw_sentences if len(s.split()) >= 10 and 60 <= len(s) <= 240]
-        if not sentences:
-            raise RuntimeError("Unable to generate questions from provided content.")
-
-        # Candidate tokens to hide as answers.
-        token_re = re.compile(r"\b[A-Za-z][A-Za-z0-9\-]{3,}\b")
-        stop = {
-            "that", "this", "with", "from", "were", "have", "their", "there", "which",
-            "about", "into", "these", "those", "would", "could", "should", "between",
-            "because", "while", "where", "when", "then", "than", "also", "such", "more",
-            "most", "only", "each", "other", "some", "many", "much", "very", "over",
-        }
-
-        # Build a global distractor pool from source words.
-        pool: List[str] = []
-        for s in sentences:
-            for t in token_re.findall(s):
-                tl = t.lower()
-                if tl not in stop and tl not in ("passage", "source", "text", "article"):
-                    if t not in pool:
-                        pool.append(t)
-
-        if len(pool) < 4:
-            raise RuntimeError("Unable to build fallback options from provided content.")
+        facts = [s for s in raw_sentences if len(s.split()) >= 8 and 50 <= len(s) <= 220]
+        if len(facts) < 2:
+            raise RuntimeError("Unable to generate fallback quiz questions.")
 
         permutations = [
-            [0, 1, 2, 3],
-            [1, 0, 2, 3],
-            [1, 2, 0, 3],
-            [1, 2, 3, 0],
+            [0, 1, 2, 3],  # A
+            [1, 0, 2, 3],  # B
+            [1, 2, 0, 3],  # C
+            [1, 2, 3, 0],  # D
         ]
+        diff = (difficulty or "medium").lower().strip()
+        if diff not in ("easy", "medium", "hard"):
+            diff = "medium"
+
+        def topic_from_sentence(sentence: str) -> str:
+            words = re.findall(r"\b[A-Za-z][A-Za-z0-9\-]{3,}\b", sentence)
+            if not words:
+                return "the passage"
+            return " ".join(words[:3])
+
+        def mutate_false(statement: str, variant: int) -> str:
+            s = statement.rstrip(".")
+            if diff == "easy":
+                if variant == 0:
+                    return f"The passage does not discuss this point: {s}."
+                if variant == 1 and " is " in s:
+                    return s.replace(" is ", " was ", 1) + "."
+                return f"The passage states the opposite of this claim: {s}."
+            if diff == "hard":
+                if variant == 0:
+                    return f"{s}. However, this ignores the broader context in the passage."
+                if variant == 1:
+                    return f"{s}. This conclusion conflicts with another key detail in the text."
+                return f"{s}. This overstates what the passage actually supports."
+            if variant == 0:
+                return f"{s}. This is only partially supported by the passage."
+            if variant == 1:
+                return f"{s}. This misses an important condition from the text."
+            return f"{s}. This interpretation is weaker than the best-supported claim."
 
         questions: List[Dict[str, Any]] = []
-        used_sentences = 0
-
+        n = len(facts)
         for idx in range(expected):
-            sentence = sentences[used_sentences % len(sentences)]
-            used_sentences += 1
+            correct = facts[idx % n]
+            topic = topic_from_sentence(correct)
 
-            candidates = [t for t in token_re.findall(sentence) if t.lower() not in stop]
-            if not candidates:
-                continue
-
-            # Hard: hide a less frequent/longer term. Easy: hide a common noun-like token.
-            diff = (difficulty or "medium").lower().strip()
-            if diff == "hard":
-                candidates.sort(key=lambda x: (-len(x), x.lower()))
-            elif diff == "easy":
-                candidates.sort(key=lambda x: (len(x), x.lower()))
+            if diff == "easy":
+                stem = f"According to the passage, which statement about {topic} is correct?"
+            elif diff == "hard":
+                stem = f"Which option is best supported by the passage when evaluating claims about {topic}?"
             else:
-                candidates.sort(key=lambda x: (-len(x), x.lower()))
-
-            answer = candidates[0]
-            blanked = re.sub(rf"\b{re.escape(answer)}\b", "____", sentence, count=1)
-            prompt = f"Fill in the blank based on the passage: \"{blanked}\""
+                stem = f"Based on the passage, which claim about {topic} is most accurate?"
 
             distractors: List[str] = []
-            for w in pool:
-                if w.lower() == answer.lower():
-                    continue
-                if w in distractors:
-                    continue
-                distractors.append(w)
-                if len(distractors) == 3:
+            for jump in range(1, n + 1):
+                candidate = facts[(idx + jump) % n]
+                if candidate != correct and candidate not in distractors:
+                    distractors.append(candidate)
+                if len(distractors) == 2:
                     break
-            if len(distractors) < 3:
-                continue
+            while len(distractors) < 2:
+                distractors.append(mutate_false(correct, len(distractors)))
 
-            base_options = [answer, distractors[0], distractors[1], distractors[2]]
+            distractors.append(mutate_false(correct, 2))
+            base_options = [correct, distractors[0], distractors[1], distractors[2]]
             order = permutations[idx % len(permutations)]
             options = [base_options[i] for i in order]
             correct_index = order.index(0)
 
             questions.append(
                 {
-                    "question": prompt,
+                    "question": stem,
                     "options": options,
                     "correct_answer": ["A", "B", "C", "D"][correct_index],
                 }
             )
 
-        if not questions:
-            raise RuntimeError("Unable to generate fallback quiz questions.")
-
-        # Ensure requested count by cycling generated questions if needed.
-        out: List[Dict[str, Any]] = []
-        for i in range(expected):
-            out.append(questions[i % len(questions)])
-        return out
+        return questions
