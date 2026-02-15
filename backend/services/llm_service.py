@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import ast
 import re
+import time
 from typing import Any, Dict, List
 
 import requests
@@ -265,36 +266,13 @@ Source text:
             raise RuntimeError("GROQ_API_KEY is not set.")
 
         prompt = self._build_prompt(content, num_questions, difficulty, retry_hint)
-        url = f"{GROQ_API_URL.rstrip('/')}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload: Dict[str, Any] = {
-            "model": GROQ_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": max(700, num_questions * 180),
-        }
-
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=180)
-        except Exception as exc:
-            raise RuntimeError("Failed to reach Groq API endpoint.") from exc
-
-        if resp.status_code >= 400:
-            raise RuntimeError(f"Groq API error: {resp.status_code} {resp.text[:500]}")
-
-        data = resp.json()
-        choices = data.get("choices")
-        if isinstance(choices, list) and choices:
-            first = choices[0]
-            if isinstance(first, dict):
-                message = first.get("message")
-                if isinstance(message, dict) and "content" in message:
-                    return str(message["content"])
-
-        raise RuntimeError("Unexpected response format from Groq API.")
+        # Keep requested output tokens modest to reduce Groq TPM limit hits.
+        max_tokens = min(1400, max(450, num_questions * 110))
+        return self._call_groq_chat(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=0.3,
+        )
 
     def _parse_questions(self, raw: str, expected: int) -> List[Dict[str, Any]]:
         blob = self._extract_json_blob(raw)
@@ -607,29 +585,75 @@ Input:
         if self.provider == "groq":
             if not GROQ_API_KEY:
                 raise RuntimeError("GROQ_API_KEY is not set.")
-            url = f"{GROQ_API_URL.rstrip('/')}/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "model": GROQ_MODEL,
-                "messages": [{"role": "user", "content": repair_prompt}],
-                "temperature": 0.1,
-                "max_tokens": max(700, expected * 160),
-            }
-            resp = requests.post(url, headers=headers, json=payload, timeout=180)
-            if resp.status_code >= 400:
-                raise RuntimeError(f"Groq repair failed: {resp.status_code} {resp.text[:500]}")
-            data = resp.json()
-            if isinstance(data, dict):
-                choices = data.get("choices")
-                if isinstance(choices, list) and choices:
-                    first = choices[0]
-                    if isinstance(first, dict):
-                        message = first.get("message")
-                        if isinstance(message, dict) and "content" in message:
-                            return str(message["content"])
-            raise RuntimeError("Groq repair failed: unexpected response format.")
+            max_tokens = min(1300, max(400, expected * 100))
+            return self._call_groq_chat(
+                messages=[{"role": "user", "content": repair_prompt}],
+                max_tokens=max_tokens,
+                temperature=0.1,
+            )
 
         raise RuntimeError("Unsupported LLM provider for repair step.")
+
+    def _call_groq_chat(
+        self,
+        *,
+        messages: List[Dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+    ) -> str:
+        url = f"{GROQ_API_URL.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload: Dict[str, Any] = {
+            "model": GROQ_MODEL,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        last_error = "Unknown Groq error."
+        for attempt in range(4):
+            try:
+                resp = requests.post(url, headers=headers, json=payload, timeout=180)
+            except Exception as exc:
+                raise RuntimeError("Failed to reach Groq API endpoint.") from exc
+
+            if resp.status_code == 429 and attempt < 3:
+                wait_s = self._extract_retry_after_seconds(resp) or 1.5
+                time.sleep(min(max(wait_s, 0.5), 8.0))
+                last_error = f"Groq rate limit exceeded (attempt {attempt + 1})."
+                continue
+
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Groq API error: {resp.status_code} {resp.text[:500]}")
+
+            data = resp.json()
+            choices = data.get("choices")
+            if isinstance(choices, list) and choices:
+                first = choices[0]
+                if isinstance(first, dict):
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        return str(message["content"])
+
+            raise RuntimeError("Unexpected response format from Groq API.")
+
+        raise RuntimeError(last_error)
+
+    def _extract_retry_after_seconds(self, resp: requests.Response) -> float | None:
+        retry_after = resp.headers.get("retry-after")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+
+        match = re.search(r"try again in ([0-9.]+)s", resp.text, re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+        return None
