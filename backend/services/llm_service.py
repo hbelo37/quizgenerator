@@ -39,8 +39,11 @@ class LLMService:
         try:
             return self._parse_questions(raw, expected=num_questions)
         except RuntimeError:
-            repaired = self._repair_to_json(raw, num_questions)
-            return self._parse_questions(repaired, expected=num_questions)
+            try:
+                repaired = self._repair_to_json(raw, num_questions)
+                return self._parse_questions(repaired, expected=num_questions)
+            except RuntimeError:
+                return self._build_fallback_questions(content, num_questions)
 
     def _build_prompt(self, content: str, num_questions: int, difficulty: str) -> str:
         difficulty = difficulty.lower()
@@ -400,3 +403,67 @@ Input:
             raise RuntimeError("Hugging Face repair failed: unexpected response format.")
 
         raise RuntimeError("Unsupported LLM provider for repair step.")
+
+    def _build_fallback_questions(self, content: str, expected: int) -> List[Dict[str, Any]]:
+        """Build simple MCQs from source text when model output is unusable."""
+        lines = [ln.strip() for ln in re.split(r"[.\n]+", content) if ln.strip()]
+        # Keep medium-length candidate statements.
+        candidates = [ln for ln in lines if 60 <= len(ln) <= 220]
+        if not candidates:
+            candidates = lines[: max(1, expected)]
+
+        question_words = [
+            "primary",
+            "main",
+            "best",
+            "key",
+            "most likely",
+            "core",
+            "central",
+            "important",
+        ]
+        fallback_questions: List[Dict[str, Any]] = []
+        seen = set()
+
+        for idx, sentence in enumerate(candidates):
+            if len(fallback_questions) >= expected:
+                break
+            sentence_clean = " ".join(sentence.split())
+            if sentence_clean.lower() in seen:
+                continue
+            seen.add(sentence_clean.lower())
+
+            words = sentence_clean.split()
+            if len(words) < 8:
+                continue
+
+            answer = sentence_clean
+            # Build distractors by simple controlled edits.
+            distractors = [
+                sentence_clean.replace(words[0], question_words[idx % len(question_words)], 1),
+                sentence_clean.replace(words[-1], "concept", 1),
+                f"{sentence_clean} This statement is unrelated to the source.",
+            ]
+            options = [answer] + distractors
+            # Keep unique options.
+            unique_options: List[str] = []
+            for opt in options:
+                opt_clean = " ".join(opt.split())
+                if opt_clean not in unique_options:
+                    unique_options.append(opt_clean)
+            while len(unique_options) < 4:
+                unique_options.append(f"None of these statements matches the text exactly ({len(unique_options)+1}).")
+            unique_options = unique_options[:4]
+
+            fallback_questions.append(
+                {
+                    "question": f"Which statement is directly supported by the provided text? ({len(fallback_questions)+1})",
+                    "options": unique_options,
+                    "correct_answer": "A",
+                }
+            )
+
+        if not fallback_questions:
+            raise RuntimeError("Unable to generate questions from provided content.")
+
+        return fallback_questions[:expected]
