@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import ast
+import re
 from typing import Any, Dict, List
 
 import requests
@@ -34,7 +36,11 @@ class LLMService:
         else:
             raise RuntimeError("Unsupported LLM provider. Use 'ollama' or 'huggingface'.")
 
-        return self._parse_questions(raw, expected=num_questions)
+        try:
+            return self._parse_questions(raw, expected=num_questions)
+        except RuntimeError:
+            repaired = self._repair_to_json(raw, num_questions)
+            return self._parse_questions(repaired, expected=num_questions)
 
     def _build_prompt(self, content: str, num_questions: int, difficulty: str) -> str:
         difficulty = difficulty.lower()
@@ -187,16 +193,13 @@ Source text:
         raise RuntimeError("Unexpected response format from Hugging Face inference API.")
 
     def _parse_questions(self, raw: str, expected: int) -> List[Dict[str, Any]]:
-        # Try to locate JSON
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start == -1 or end <= start:
+        blob = self._extract_json_blob(raw)
+        if blob is None:
+            # Last fallback: try parsing common plaintext MCQ format.
+            plaintext_questions = self._parse_plaintext_questions(raw, expected)
+            if plaintext_questions:
+                return plaintext_questions
             raise RuntimeError("LLM response did not contain JSON.")
-
-        try:
-            blob = json.loads(raw[start:end])
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Failed to parse LLM JSON: {exc}") from exc
 
         questions = blob.get("questions")
         if not isinstance(questions, list) or not questions:
@@ -233,3 +236,167 @@ Source text:
             raise RuntimeError("No valid questions parsed from LLM output.")
 
         return normalised[:expected]
+
+    def _extract_json_blob(self, raw: str) -> Dict[str, Any] | None:
+        # Prefer fenced ```json blocks when present.
+        fence_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", raw, re.IGNORECASE)
+        candidates: List[str] = []
+        if fence_match:
+            candidates.append(fence_match.group(1))
+
+        # Generic object candidate.
+        obj_start = raw.find("{")
+        obj_end = raw.rfind("}") + 1
+        if obj_start != -1 and obj_end > obj_start:
+            candidates.append(raw[obj_start:obj_end])
+
+        # Some models return only an array.
+        arr_start = raw.find("[")
+        arr_end = raw.rfind("]") + 1
+        if arr_start != -1 and arr_end > arr_start:
+            candidates.append('{"questions": ' + raw[arr_start:arr_end] + "}")
+
+        for candidate in candidates:
+            # Normalize smart quotes that often break JSON parsing.
+            normalized = (
+                candidate.replace("“", '"')
+                .replace("”", '"')
+                .replace("’", "'")
+                .replace("‘", "'")
+            )
+
+            try:
+                parsed = json.loads(normalized)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                # Fall back to python-literal parsing for pseudo-JSON output.
+                try:
+                    parsed = ast.literal_eval(normalized)
+                    if isinstance(parsed, list):
+                        return {"questions": parsed}
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    continue
+        return None
+
+    def _parse_plaintext_questions(self, raw: str, expected: int) -> List[Dict[str, Any]]:
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        question_re = re.compile(r"^(?:Q(?:uestion)?\s*)?(\d+)[\)\.\:\-]\s+(.+)$", re.IGNORECASE)
+        option_re = re.compile(r"^([A-D])[\)\.\:\-]\s+(.+)$", re.IGNORECASE)
+        answer_re = re.compile(r"^(?:answer|correct(?:\s+answer)?)\s*[:\-]?\s*([A-D])\b", re.IGNORECASE)
+
+        parsed: List[Dict[str, Any]] = []
+        current_question = ""
+        current_options: Dict[str, str] = {}
+        current_answer = "A"
+
+        def flush_current() -> None:
+            nonlocal current_question, current_options, current_answer
+            if current_question and len(current_options) == 4:
+                parsed.append(
+                    {
+                        "question": current_question,
+                        "options": [
+                            current_options.get("A", ""),
+                            current_options.get("B", ""),
+                            current_options.get("C", ""),
+                            current_options.get("D", ""),
+                        ],
+                        "correct_answer": current_answer,
+                    }
+                )
+            current_question = ""
+            current_options = {}
+            current_answer = "A"
+
+        for line in lines:
+            qm = question_re.match(line)
+            if qm:
+                flush_current()
+                current_question = qm.group(2).strip()
+                continue
+
+            om = option_re.match(line)
+            if om and current_question:
+                current_options[om.group(1).upper()] = om.group(2).strip()
+                continue
+
+            am = answer_re.match(line)
+            if am and current_question:
+                current_answer = am.group(1).upper()
+
+        flush_current()
+        return parsed[:expected]
+
+    def _repair_to_json(self, raw: str, expected: int) -> str:
+        # Ask the model to convert arbitrary output into strict JSON.
+        repair_prompt = f"""
+Convert the following quiz text into strict JSON.
+Return only JSON with this shape:
+{{
+  "questions": [
+    {{
+      "question": "Question text?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_answer": "A"
+    }}
+  ]
+}}
+Keep at most {expected} questions.
+
+Input:
+\"\"\"{raw[:12000]}\"\"\"
+"""
+
+        if self.provider == "ollama":
+            url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+            resp = requests.post(
+                url,
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": repair_prompt,
+                    "stream": False,
+                    "temperature": 0.1,
+                },
+                timeout=180,
+            )
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Ollama repair failed: {resp.status_code} {resp.text}")
+            data = resp.json()
+            return str(data.get("response", ""))
+
+        if self.provider == "huggingface":
+            base_url = HUGGINGFACE_API_URL.rstrip("/")
+            if "api-inference.huggingface.co" in base_url:
+                base_url = base_url.replace(
+                    "https://api-inference.huggingface.co",
+                    "https://router.huggingface.co/hf-inference",
+                )
+            model = HUGGINGFACE_MODEL.strip().strip("/")
+            chat_url = f"{base_url}/{model}/v1/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if HUGGINGFACE_API_TOKEN:
+                headers["Authorization"] = f"Bearer {HUGGINGFACE_API_TOKEN}"
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": repair_prompt}],
+                "temperature": 0.1,
+                "max_tokens": max(512, expected * 160),
+            }
+            resp = requests.post(chat_url, headers=headers, json=payload, timeout=180)
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Hugging Face repair failed: {resp.status_code} {resp.text[:500]}")
+            data = resp.json()
+            if isinstance(data, dict):
+                choices = data.get("choices")
+                if isinstance(choices, list) and choices:
+                    first = choices[0]
+                    if isinstance(first, dict):
+                        message = first.get("message")
+                        if isinstance(message, dict) and "content" in message:
+                            return str(message["content"])
+            raise RuntimeError("Hugging Face repair failed: unexpected response format.")
+
+        raise RuntimeError("Unsupported LLM provider for repair step.")
