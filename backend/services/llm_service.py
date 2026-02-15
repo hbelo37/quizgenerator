@@ -8,6 +8,9 @@ from typing import Any, Dict, List
 import requests
 
 from config import (
+    GROQ_API_KEY,
+    GROQ_API_URL,
+    GROQ_MODEL,
     HUGGINGFACE_API_TOKEN,
     HUGGINGFACE_API_URL,
     HUGGINGFACE_MODEL,
@@ -29,8 +32,8 @@ class LLMService:
         num_questions: int,
         difficulty: str,
     ) -> List[Dict[str, Any]]:
-        if self.provider not in ("ollama", "huggingface"):
-            raise RuntimeError("Unsupported LLM provider. Use 'ollama' or 'huggingface'.")
+        if self.provider not in ("ollama", "huggingface", "groq"):
+            raise RuntimeError("Unsupported LLM provider. Use 'ollama', 'huggingface', or 'groq'.")
 
         retry_hints = [
             "",
@@ -46,8 +49,10 @@ class LLMService:
             try:
                 if self.provider == "ollama":
                     raw = self._call_ollama(content, num_questions, difficulty, hint)
-                else:
+                elif self.provider == "huggingface":
                     raw = self._call_huggingface(content, num_questions, difficulty, hint)
+                else:
+                    raw = self._call_groq(content, num_questions, difficulty, hint)
             except RuntimeError as exc:
                 last_error = str(exc)
                 continue
@@ -252,6 +257,44 @@ Source text:
                 raise RuntimeError(f"Hugging Face inference error: {data['error']}")
 
         raise RuntimeError("Unexpected response format from Hugging Face inference API.")
+
+    def _call_groq(
+        self, content: str, num_questions: int, difficulty: str, retry_hint: str = ""
+    ) -> str:
+        if not GROQ_API_KEY:
+            raise RuntimeError("GROQ_API_KEY is not set.")
+
+        prompt = self._build_prompt(content, num_questions, difficulty, retry_hint)
+        url = f"{GROQ_API_URL.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload: Dict[str, Any] = {
+            "model": GROQ_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": max(700, num_questions * 180),
+        }
+
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=180)
+        except Exception as exc:
+            raise RuntimeError("Failed to reach Groq API endpoint.") from exc
+
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Groq API error: {resp.status_code} {resp.text[:500]}")
+
+        data = resp.json()
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict):
+                message = first.get("message")
+                if isinstance(message, dict) and "content" in message:
+                    return str(message["content"])
+
+        raise RuntimeError("Unexpected response format from Groq API.")
 
     def _parse_questions(self, raw: str, expected: int) -> List[Dict[str, Any]]:
         blob = self._extract_json_blob(raw)
@@ -560,5 +603,33 @@ Input:
                         if isinstance(message, dict) and "content" in message:
                             return str(message["content"])
             raise RuntimeError("Hugging Face repair failed: unexpected response format.")
+
+        if self.provider == "groq":
+            if not GROQ_API_KEY:
+                raise RuntimeError("GROQ_API_KEY is not set.")
+            url = f"{GROQ_API_URL.rstrip('/')}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": GROQ_MODEL,
+                "messages": [{"role": "user", "content": repair_prompt}],
+                "temperature": 0.1,
+                "max_tokens": max(700, expected * 160),
+            }
+            resp = requests.post(url, headers=headers, json=payload, timeout=180)
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Groq repair failed: {resp.status_code} {resp.text[:500]}")
+            data = resp.json()
+            if isinstance(data, dict):
+                choices = data.get("choices")
+                if isinstance(choices, list) and choices:
+                    first = choices[0]
+                    if isinstance(first, dict):
+                        message = first.get("message")
+                        if isinstance(message, dict) and "content" in message:
+                            return str(message["content"])
+            raise RuntimeError("Groq repair failed: unexpected response format.")
 
         raise RuntimeError("Unsupported LLM provider for repair step.")
