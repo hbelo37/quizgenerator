@@ -96,13 +96,19 @@ async def generate_quiz(
         )
 
     service = QuizService(db)
-    result = service.generate_quiz(
-        content=request.content,
-        source_type=request.source_type,
-        source_label=request.source_label,
-        difficulty=request.normalised_difficulty(),
-        num_questions=request.num_questions,
-    )
+    try:
+        result = service.generate_quiz(
+            content=request.content,
+            source_type=request.source_type,
+            source_label=request.source_label,
+            difficulty=request.normalised_difficulty(),
+            num_questions=request.num_questions,
+        )
+    except RuntimeError as exc:
+        # Typically raised when the LLM backend (e.g., Ollama) is unavailable.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Quiz generation failed: {exc}") from exc
 
     return GenerateQuizResponse(
         quiz_id=result["quiz_id"],
