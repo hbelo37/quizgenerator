@@ -55,9 +55,12 @@
       <div class="section-group">
         <label class="section-label">Number of Questions</label>
         <div class="button-group">
-          <button class="qty-btn active" data-qty="15">15</button>
-          <button class="qty-btn" data-qty="20">20</button>
+          <button class="qty-btn" data-qty="5">5</button>
+          <button class="qty-btn active" data-qty="10">10</button>
+          <button class="qty-btn locked" data-qty="15" disabled title="Locked to control API usage and avoid model rate-limit errors.">15 🔒</button>
+          <button class="qty-btn locked" data-qty="20" disabled title="Locked to control API usage and avoid model rate-limit errors.">20 🔒</button>
         </div>
+        <p class="footer-note">15 and 20 are locked to control API usage and keep generation reliable.</p>
       </div>
 
       <!-- Difficulty Level -->
@@ -93,7 +96,7 @@
     <section id="step-quiz" class="card hidden">
       <div class="quiz-header">
         <div class="progress-info">
-          <span id="question-counter">Question 1 of 15</span>
+            <span id="question-counter">Question 1 of 10</span>
           <div class="progress-bar">
             <div id="progress-fill" class="progress-fill"></div>
           </div>

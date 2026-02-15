@@ -73,13 +73,40 @@ class QuizService:
 
         questions: List[Dict[str, Any]] = json.loads(quiz.questions_json)
         score = 0
+        results: List[Dict[str, Any]] = []
 
         for idx, q in enumerate(questions):
             user_answer = answers.get(idx)
-            if not user_answer:
-                continue
-            if str(user_answer).upper() == q.get("correct_answer", "").upper():
+            if user_answer is None:
+                user_answer = answers.get(str(idx))  # defensive: JSON keys are often strings
+
+            selected_letter = str(user_answer).upper() if user_answer is not None else None
+            correct_letter = str(q.get("correct_answer", "A")).upper()
+            options = q.get("options", [])
+
+            def option_text(letter: str | None) -> str | None:
+                if letter is None or letter not in ("A", "B", "C", "D"):
+                    return None
+                option_idx = {"A": 0, "B": 1, "C": 2, "D": 3}[letter]
+                if isinstance(options, list) and len(options) > option_idx:
+                    return str(options[option_idx])
+                return None
+
+            is_correct = selected_letter == correct_letter
+            if is_correct:
                 score += 1
+
+            results.append(
+                {
+                    "index": idx,
+                    "question": str(q.get("question", "")),
+                    "selected_answer": selected_letter if selected_letter in ("A", "B", "C", "D") else None,
+                    "selected_option": option_text(selected_letter),
+                    "correct_answer": correct_letter if correct_letter in ("A", "B", "C", "D") else "A",
+                    "correct_option": option_text(correct_letter) or "",
+                    "is_correct": is_correct,
+                }
+            )
 
         total = len(questions)
         percentage = (score / total * 100.0) if total else 0.0
@@ -93,5 +120,4 @@ class QuizService:
         self.db.add(response)
         self.db.commit()
 
-        return {"score": score, "total": total, "percentage": percentage}
-
+        return {"score": score, "total": total, "percentage": percentage, "results": results}

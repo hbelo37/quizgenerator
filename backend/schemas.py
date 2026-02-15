@@ -22,7 +22,7 @@ class GenerateQuizRequest(BaseModel):
     source_type: constr(strip_whitespace=True) = "text"
     source_label: str | None = None
     difficulty: constr(strip_whitespace=True) = "medium"
-    num_questions: int = Field(15, ge=MIN_QUESTIONS, le=MAX_QUESTIONS)
+    num_questions: int = Field(10, ge=MIN_QUESTIONS, le=MAX_QUESTIONS)
 
     def normalised_difficulty(self) -> str:
         d = self.difficulty.strip().lower()
@@ -60,8 +60,18 @@ class SubmitQuizRequest(BaseModel):
     answers: Dict[int, str]
 
 
+class SubmitQuizResult(BaseModel):
+    index: int
+    question: str
+    selected_answer: str | None
+    selected_option: str | None
+    correct_answer: str
+    correct_option: str
+    is_correct: bool
+
+
 class SubmitQuizResponse(BaseModel):
     score: int
     total: int
     percentage: float
-
+    results: List[SubmitQuizResult]

@@ -120,6 +120,43 @@
   box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
 }
 
+.review-section {
+  margin-bottom: 24px;
+}
+
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.review-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.review-question {
+  font-size: 14px;
+  color: #1e293b;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.review-line {
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.review-line.wrong {
+  color: #dc2626;
+}
+
+.review-line.correct {
+  color: #059669;
+}
+
 @media (max-width: 640px) {
   .results-card {
     padding: 24px;

@@ -28,6 +28,7 @@ function ResultsPage({ quizData, quizId, onReset }) {
   }
 
   const percentage = Math.round(quizData.percentage);
+  const wrongResults = (quizData.results || []).filter((item) => !item.is_correct);
   let message = '';
   if (percentage >= 90) message = '🎉 Excellent work!';
   else if (percentage >= 70) message = '👍 Great job!';
@@ -57,6 +58,27 @@ function ResultsPage({ quizData, quizId, onReset }) {
           </button>
         </div>
       </div>
+
+      {wrongResults.length > 0 && (
+        <div className="review-section">
+          <label className="section-label">Review Incorrect Answers</label>
+          <div className="review-list">
+            {wrongResults.map((item) => (
+              <div key={item.index} className="review-item">
+                <p className="review-question">
+                  Q{item.index + 1}. {item.question}
+                </p>
+                <p className="review-line wrong">
+                  Your answer: {item.selected_answer ? `${item.selected_answer}. ${item.selected_option || ''}` : 'Not answered'}
+                </p>
+                <p className="review-line correct">
+                  Correct answer: {item.correct_answer}. {item.correct_option}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <button className="btn-generate" onClick={onReset}>
         Create Another Quiz

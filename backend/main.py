@@ -142,6 +142,7 @@ def submit_quiz(
         score=result["score"],
         total=result["total"],
         percentage=result["percentage"],
+        results=result["results"],
     )
 
 

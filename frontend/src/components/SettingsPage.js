@@ -9,7 +9,7 @@ function SettingsPage({ onQuizGenerated }) {
   const [sourceType, setSourceType] = useState('url');
   const [url, setUrl] = useState('');
   const [pdfFile, setPdfFile] = useState(null);
-  const [numQuestions, setNumQuestions] = useState(15);
+  const [numQuestions, setNumQuestions] = useState(10);
   const [difficulty, setDifficulty] = useState('medium');
   const [status, setStatus] = useState({ text: '', type: '' });
   const [isGenerating, setIsGenerating] = useState(false);
@@ -204,7 +204,7 @@ function SettingsPage({ onQuizGenerated }) {
       <div className="section-group">
         <label className="section-label">Number of Questions</label>
         <div className="button-group">
-          {[15, 20].map((num) => (
+          {[5, 10].map((num) => (
             <button
               key={num}
               className={`qty-btn ${numQuestions === num ? 'active' : ''}`}
@@ -213,7 +213,18 @@ function SettingsPage({ onQuizGenerated }) {
               {num}
             </button>
           ))}
+          {[15, 20].map((num) => (
+            <button
+              key={`locked-${num}`}
+              className="qty-btn locked"
+              disabled
+              title="Locked to control API usage and avoid model rate-limit errors."
+            >
+              {num} 🔒
+            </button>
+          ))}
         </div>
+        <p className="qty-lock-note">15 and 20 are locked to control API usage and keep generation reliable.</p>
       </div>
 
       {/* Difficulty Level */}
