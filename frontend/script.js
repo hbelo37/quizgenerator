@@ -170,7 +170,7 @@ async function generateQuiz() {
   const difficultyBtn = document.querySelector(".difficulty-btn.active");
   const qtyBtn = document.querySelector(".qty-btn.active");
   const difficulty = difficultyBtn?.getAttribute("data-difficulty") || "medium";
-  const numQuestions = parseInt(qtyBtn?.getAttribute("data-qty") || "10");
+  const numQuestions = parseInt(qtyBtn?.getAttribute("data-qty") || "15");
 
   setGenerateStatus("Generating quiz, it may take a minute...", "info");
   $("generate-quiz").disabled = true;
@@ -385,7 +385,7 @@ function resetAll() {
   
   // Reset buttons
   document.querySelectorAll(".qty-btn").forEach((b) => b.classList.remove("active"));
-  document.querySelector(".qty-btn[data-qty='10']").classList.add("active");
+  document.querySelector(".qty-btn[data-qty='15']").classList.add("active");
   
   document.querySelectorAll(".difficulty-btn").forEach((b) => b.classList.remove("active"));
   document.querySelector(".difficulty-btn[data-difficulty='medium']").classList.add("active");

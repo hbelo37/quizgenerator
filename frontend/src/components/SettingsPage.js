@@ -9,7 +9,7 @@ function SettingsPage({ onQuizGenerated }) {
   const [sourceType, setSourceType] = useState('url');
   const [url, setUrl] = useState('');
   const [pdfFile, setPdfFile] = useState(null);
-  const [numQuestions, setNumQuestions] = useState(10);
+  const [numQuestions, setNumQuestions] = useState(15);
   const [difficulty, setDifficulty] = useState('medium');
   const [status, setStatus] = useState({ text: '', type: '' });
   const [isGenerating, setIsGenerating] = useState(false);
@@ -204,7 +204,7 @@ function SettingsPage({ onQuizGenerated }) {
       <div className="section-group">
         <label className="section-label">Number of Questions</label>
         <div className="button-group">
-          {[5, 10, 15, 20].map((num) => (
+          {[15, 20].map((num) => (
             <button
               key={num}
               className={`qty-btn ${numQuestions === num ? 'active' : ''}`}

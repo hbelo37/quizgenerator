@@ -28,8 +28,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
 # Quiz settings
-MIN_QUESTIONS = 5
-MAX_QUESTIONS = 50
+MIN_QUESTIONS = 15
+MAX_QUESTIONS = 20
 DIFFICULTIES = ["easy", "medium", "hard"]
 
 # Upload constraints

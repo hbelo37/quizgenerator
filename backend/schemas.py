@@ -22,7 +22,7 @@ class GenerateQuizRequest(BaseModel):
     source_type: constr(strip_whitespace=True) = "text"
     source_label: str | None = None
     difficulty: constr(strip_whitespace=True) = "medium"
-    num_questions: int = Field(10, ge=MIN_QUESTIONS, le=MAX_QUESTIONS)
+    num_questions: int = Field(15, ge=MIN_QUESTIONS, le=MAX_QUESTIONS)
 
     def normalised_difficulty(self) -> str:
         d = self.difficulty.strip().lower()
