@@ -254,6 +254,7 @@ vercel --prod
 - `PORT` (auto-set by hosting)
 - `LLM_PROVIDER` (optional, defaults to "huggingface")
 - `HUGGINGFACE_API_TOKEN` (recommended for Hugging Face free inference)
+- `HUGGINGFACE_API_URL` (optional, defaults to `https://router.huggingface.co/hf-inference/models`)
 - `HUGGINGFACE_MODEL` (optional, defaults to `google/flan-t5-base`)
 - `OLLAMA_BASE_URL` (only if using Ollama)
 

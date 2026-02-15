@@ -107,7 +107,15 @@ Source text:
 
     def _call_huggingface(self, content: str, num_questions: int, difficulty: str) -> str:
         prompt = self._build_prompt(content, num_questions, difficulty)
-        url = f"{HUGGINGFACE_API_URL.rstrip('/')}/{HUGGINGFACE_MODEL}"
+        base_url = HUGGINGFACE_API_URL.rstrip("/")
+        # Hugging Face migrated from api-inference.huggingface.co to router.huggingface.co.
+        if "api-inference.huggingface.co" in base_url:
+            base_url = base_url.replace(
+                "https://api-inference.huggingface.co",
+                "https://router.huggingface.co/hf-inference",
+            )
+
+        url = f"{base_url}/{HUGGINGFACE_MODEL}"
         headers = {"Content-Type": "application/json"}
         if HUGGINGFACE_API_TOKEN:
             headers["Authorization"] = f"Bearer {HUGGINGFACE_API_TOKEN}"
