@@ -39,31 +39,43 @@ class LLMService:
         try:
             parsed = self._parse_questions(raw, expected=num_questions)
             if len(parsed) < num_questions:
-                parsed.extend(self._build_fallback_questions(content, num_questions - len(parsed)))
+                parsed.extend(
+                    self._build_fallback_questions(
+                        content,
+                        num_questions - len(parsed),
+                        difficulty=difficulty,
+                    )
+                )
             return parsed[:num_questions]
         except RuntimeError:
             try:
                 repaired = self._repair_to_json(raw, num_questions)
                 parsed = self._parse_questions(repaired, expected=num_questions)
                 if len(parsed) < num_questions:
-                    parsed.extend(self._build_fallback_questions(content, num_questions - len(parsed)))
+                    parsed.extend(
+                        self._build_fallback_questions(
+                            content,
+                            num_questions - len(parsed),
+                            difficulty=difficulty,
+                        )
+                    )
                 return parsed[:num_questions]
             except RuntimeError:
-                return self._build_fallback_questions(content, num_questions)
+                return self._build_fallback_questions(content, num_questions, difficulty=difficulty)
 
     def _build_prompt(self, content: str, num_questions: int, difficulty: str) -> str:
         difficulty = difficulty.lower()
         if difficulty == "easy":
             difficulty_instructions = (
-                "Ask factual, direct questions whose answers appear explicitly in the text."
+                "Create factual recall questions only. Each answer must appear explicitly in the text."
             )
         elif difficulty == "hard":
             difficulty_instructions = (
-                "Ask analytical, multi-step questions with tricky but fair distractors."
+                "Create analytical, multi-step questions requiring synthesis of multiple details."
             )
         else:
             difficulty_instructions = (
-                "Ask conceptual questions that require understanding and light reasoning."
+                "Create conceptual inference questions that require understanding and light reasoning."
             )
 
         truncated = content[:6000]
@@ -80,6 +92,9 @@ Rules:
 - Options must be realistic and non‑trivial.
 - Exactly one option is correct per question.
 - Make sure the correct option is unambiguously supported by the text.
+- For EASY: no trick wording, no negations like "NOT", single-fact recall.
+- For MEDIUM: include paraphrase/inference, not direct copy of one sentence.
+- For HARD: require combining at least two ideas from different parts of the text.
 
 Return ONLY valid JSON, nothing else. The JSON must have this exact shape:
 {{
@@ -468,7 +483,7 @@ Input:
 
         raise RuntimeError("Unsupported LLM provider for repair step.")
 
-    def _build_fallback_questions(self, content: str, expected: int) -> List[Dict[str, Any]]:
+    def _build_fallback_questions(self, content: str, expected: int, difficulty: str) -> List[Dict[str, Any]]:
         """Build deterministic, content-grounded MCQs when model output is unusable."""
         normalized = " ".join(content.split())
         raw_sentences = re.split(r"(?<=[.!?])\s+", normalized)
@@ -485,12 +500,30 @@ Input:
         if not sentences:
             raise RuntimeError("Unable to generate questions from provided content.")
 
-        stems = [
-            "According to the passage, which statement is accurate?",
-            "Which option is directly supported by the source text?",
-            "Based on the provided content, which claim is true?",
-            "Which statement best matches the passage?",
-        ]
+        diff = (difficulty or "medium").lower().strip()
+        if diff not in ("easy", "medium", "hard"):
+            diff = "medium"
+        if diff == "easy":
+            stems = [
+                "According to the passage, which statement is correct?",
+                "Which fact is explicitly mentioned in the source?",
+                "Which option directly matches the text?",
+                "What does the passage clearly state?",
+            ]
+        elif diff == "hard":
+            stems = [
+                "Which conclusion best follows when combining the passage details?",
+                "Based on the full passage, which interpretation is most defensible?",
+                "Which option requires synthesizing multiple points from the text?",
+                "Which claim is best supported by the text as a whole?",
+            ]
+        else:
+            stems = [
+                "Based on the passage, which claim is best supported?",
+                "Which option is the most reasonable inference from the text?",
+                "Which statement best reflects the passage's meaning?",
+                "According to the source, which interpretation is accurate?",
+            ]
         permutations = [
             [0, 1, 2, 3],  # A correct
             [1, 0, 2, 3],  # B correct
@@ -500,21 +533,40 @@ Input:
 
         def mutate(sentence: str, variant: int) -> str:
             s = sentence
+            if diff == "easy":
+                if variant == 0:
+                    return f"{s} This is not discussed in the source."
+                if variant == 1 and " is " in s:
+                    return s.replace(" is ", " was ", 1)
+                return f"The passage states the opposite of this: {s}"
+
+            if diff == "hard":
+                if variant == 0:
+                    return f"{s} Therefore only one minor detail matters, not the overall context."
+                if variant == 1:
+                    return f"{s} This conclusion ignores the other key points in the passage."
+                return f"{s} This interpretation contradicts at least one major point."
+
+            # medium
             if variant == 0:
-                return f"{s} This is described as the least relevant detail."
+                return f"{s} This overgeneralizes the claim beyond the passage."
             if variant == 1:
-                if " is " in s:
-                    return s.replace(" is ", " is not ", 1)
-                return f"It is false that {s[:1].lower()}{s[1:]}"
-            if " are " in s:
-                return s.replace(" are ", " are not ", 1)
-            return f"The passage rejects this claim: {s}"
+                return f"{s} This misses an important condition mentioned in the text."
+            return f"{s} This interpretation is weaker than the text-supported option."
 
         questions: List[Dict[str, Any]] = []
         total_sentences = len(sentences)
 
         for idx in range(expected):
-            correct = sentences[idx % total_sentences]
+            if diff == "hard" and total_sentences >= 2:
+                s1 = sentences[idx % total_sentences]
+                s2 = sentences[(idx + 1) % total_sentences]
+                if s1 != s2:
+                    correct = f"{s1} {s2}"
+                else:
+                    correct = s1
+            else:
+                correct = sentences[idx % total_sentences]
 
             distractors: List[str] = []
             for jump in range(1, total_sentences + 1):
