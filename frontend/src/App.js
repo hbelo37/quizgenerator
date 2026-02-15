@@ -3,8 +3,7 @@ import './App.css';
 import SettingsPage from './components/SettingsPage';
 import QuizPage from './components/QuizPage';
 import ResultsPage from './components/ResultsPage';
-
-const API_BASE = process.env.REACT_APP_API_BASE || '';
+import { API_BASE } from './utils/apiBase';
 
 function App() {
   const [step, setStep] = useState('settings'); // 'settings', 'quiz', 'results'

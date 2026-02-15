@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import './SettingsPage.css';
-
-const API_BASE = process.env.REACT_APP_API_BASE || '';
+import { API_BASE } from '../utils/apiBase';
 
 // Debug: Log API base URL
 console.log('API_BASE:', API_BASE || 'Using relative URLs');

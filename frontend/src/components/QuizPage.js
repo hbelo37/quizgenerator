@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './QuizPage.css';
-
-const API_BASE = process.env.REACT_APP_API_BASE || '';
+import { API_BASE } from '../utils/apiBase';
 
 function QuizPage({ questions, quizId, onQuizSubmitted, onReset }) {
   const [currentIndex, setCurrentIndex] = useState(0);
