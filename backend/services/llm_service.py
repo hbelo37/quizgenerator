@@ -91,6 +91,9 @@ Return ONLY valid JSON, nothing else. The JSON must have this exact shape:
     }}
   ]
 }}
+Do not wrap JSON in markdown fences.
+Do not add explanations before or after JSON.
+`correct_answer` must be one of: "A", "B", "C", "D".
 
 Source text:
 \"\"\"{truncated}\"\"\""""
@@ -216,16 +219,33 @@ Source text:
 
         normalised: List[Dict[str, Any]] = []
         for q in questions:
-            question = str(q.get("question", "")).strip()
-            options = q.get("options") or []
-            correct = str(q.get("correct_answer", "")).strip()
-
-            if not question or not isinstance(options, list) or len(options) != 4:
+            if not isinstance(q, dict):
                 continue
 
-            # accept either "A"/"B"/"C"/"D" or exact option text
+            question = str(
+                q.get("question")
+                or q.get("stem")
+                or q.get("prompt")
+                or q.get("query")
+                or ""
+            ).strip()
+            options = self._normalise_options(q.get("options"))
+            correct = str(
+                q.get("correct_answer")
+                or q.get("answer")
+                or q.get("correct")
+                or q.get("correct_option")
+                or ""
+            ).strip()
+
+            if not question or len(options) != 4:
+                continue
+
+            # accept either "A"/"B"/"C"/"D", "1-4", or exact option text
             if correct.upper() in ("A", "B", "C", "D"):
                 idx = {"A": 0, "B": 1, "C": 2, "D": 3}[correct.upper()]
+            elif correct in ("1", "2", "3", "4"):
+                idx = int(correct) - 1
             else:
                 try:
                     idx = options.index(correct)
@@ -245,6 +265,44 @@ Source text:
             raise RuntimeError("No valid questions parsed from LLM output.")
 
         return normalised[:expected]
+
+    def _normalise_options(self, raw_options: Any) -> List[str]:
+        if raw_options is None:
+            return []
+
+        # Format: ["a", "b", "c", "d"]
+        if isinstance(raw_options, list):
+            options: List[str] = []
+            for item in raw_options:
+                if isinstance(item, str):
+                    options.append(item.strip())
+                elif isinstance(item, dict):
+                    # Format: [{"label":"A","text":"..."}, ...]
+                    text = item.get("text") or item.get("value") or item.get("option")
+                    if text:
+                        options.append(str(text).strip())
+            return [o for o in options if o][:4]
+
+        # Format: {"A":"...", "B":"...", "C":"...", "D":"..."}
+        if isinstance(raw_options, dict):
+            letter_keys = ["A", "B", "C", "D"]
+            if all(k in raw_options for k in letter_keys):
+                return [str(raw_options[k]).strip() for k in letter_keys]
+
+            # Fallback for lowercase/numbered keys
+            key_order = ["a", "b", "c", "d", "1", "2", "3", "4"]
+            options: List[str] = []
+            for key in key_order:
+                if key in raw_options:
+                    options.append(str(raw_options[key]).strip())
+            if len(options) >= 4:
+                return options[:4]
+
+            # Last resort: take first 4 values in dict order
+            values = [str(v).strip() for v in raw_options.values() if str(v).strip()]
+            return values[:4]
+
+        return []
 
     def _extract_json_blob(self, raw: str) -> Dict[str, Any] | None:
         # Prefer fenced ```json blocks when present.
