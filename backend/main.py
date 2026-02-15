@@ -35,13 +35,15 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_event() -> None:
     init_db()
-    # mount React build if present, otherwise mount source
+    # Mount frontend only when static directories exist.
+    # In API-only deployments (e.g., Railway backend service), these paths
+    # are often absent and should not crash the server startup.
     frontend_build = UPLOAD_DIR.parent / "frontend" / "build"
     frontend_src = UPLOAD_DIR.parent / "frontend"
     if frontend_build.exists():
         app.mount("/", StaticFiles(directory=str(frontend_build), html=True), name="frontend")
-    else:
-        # Fallback: serve static files from src during development
+    elif (frontend_src / "public").exists():
+        # Fallback: serve static files from source during development
         app.mount("/", StaticFiles(directory=str(frontend_src / "public"), html=True), name="frontend")
 
 
@@ -146,4 +148,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
