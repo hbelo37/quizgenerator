@@ -37,11 +37,17 @@ class LLMService:
             raise RuntimeError("Unsupported LLM provider. Use 'ollama' or 'huggingface'.")
 
         try:
-            return self._parse_questions(raw, expected=num_questions)
+            parsed = self._parse_questions(raw, expected=num_questions)
+            if len(parsed) < num_questions:
+                parsed.extend(self._build_fallback_questions(content, num_questions - len(parsed)))
+            return parsed[:num_questions]
         except RuntimeError:
             try:
                 repaired = self._repair_to_json(raw, num_questions)
-                return self._parse_questions(repaired, expected=num_questions)
+                parsed = self._parse_questions(repaired, expected=num_questions)
+                if len(parsed) < num_questions:
+                    parsed.extend(self._build_fallback_questions(content, num_questions - len(parsed)))
+                return parsed[:num_questions]
             except RuntimeError:
                 return self._build_fallback_questions(content, num_questions)
 
@@ -405,65 +411,79 @@ Input:
         raise RuntimeError("Unsupported LLM provider for repair step.")
 
     def _build_fallback_questions(self, content: str, expected: int) -> List[Dict[str, Any]]:
-        """Build simple MCQs from source text when model output is unusable."""
-        lines = [ln.strip() for ln in re.split(r"[.\n]+", content) if ln.strip()]
-        # Keep medium-length candidate statements.
-        candidates = [ln for ln in lines if 60 <= len(ln) <= 220]
-        if not candidates:
-            candidates = lines[: max(1, expected)]
+        """Build deterministic, content-grounded MCQs when model output is unusable."""
+        normalized = " ".join(content.split())
+        raw_sentences = re.split(r"(?<=[.!?])\s+", normalized)
+        sentences = []
+        for sentence in raw_sentences:
+            s = sentence.strip()
+            if len(s.split()) >= 8 and 45 <= len(s) <= 240:
+                sentences.append(s)
 
-        question_words = [
-            "primary",
-            "main",
-            "best",
-            "key",
-            "most likely",
-            "core",
-            "central",
-            "important",
+        if not sentences:
+            lines = [ln.strip() for ln in re.split(r"[.\n]+", content) if ln.strip()]
+            sentences = [ln for ln in lines if len(ln.split()) >= 8]
+
+        if not sentences:
+            raise RuntimeError("Unable to generate questions from provided content.")
+
+        stems = [
+            "According to the passage, which statement is accurate?",
+            "Which option is directly supported by the source text?",
+            "Based on the provided content, which claim is true?",
+            "Which statement best matches the passage?",
         ]
-        fallback_questions: List[Dict[str, Any]] = []
-        seen = set()
+        permutations = [
+            [0, 1, 2, 3],  # A correct
+            [1, 0, 2, 3],  # B correct
+            [1, 2, 0, 3],  # C correct
+            [1, 2, 3, 0],  # D correct
+        ]
 
-        for idx, sentence in enumerate(candidates):
-            if len(fallback_questions) >= expected:
-                break
-            sentence_clean = " ".join(sentence.split())
-            if sentence_clean.lower() in seen:
-                continue
-            seen.add(sentence_clean.lower())
+        def mutate(sentence: str, variant: int) -> str:
+            s = sentence
+            if variant == 0:
+                return f"{s} This is described as the least relevant detail."
+            if variant == 1:
+                if " is " in s:
+                    return s.replace(" is ", " is not ", 1)
+                return f"It is false that {s[:1].lower()}{s[1:]}"
+            if " are " in s:
+                return s.replace(" are ", " are not ", 1)
+            return f"The passage rejects this claim: {s}"
 
-            words = sentence_clean.split()
-            if len(words) < 8:
-                continue
+        questions: List[Dict[str, Any]] = []
+        total_sentences = len(sentences)
 
-            answer = sentence_clean
-            # Build distractors by simple controlled edits.
-            distractors = [
-                sentence_clean.replace(words[0], question_words[idx % len(question_words)], 1),
-                sentence_clean.replace(words[-1], "concept", 1),
-                f"{sentence_clean} This statement is unrelated to the source.",
-            ]
-            options = [answer] + distractors
-            # Keep unique options.
-            unique_options: List[str] = []
-            for opt in options:
-                opt_clean = " ".join(opt.split())
-                if opt_clean not in unique_options:
-                    unique_options.append(opt_clean)
-            while len(unique_options) < 4:
-                unique_options.append(f"None of these statements matches the text exactly ({len(unique_options)+1}).")
-            unique_options = unique_options[:4]
+        for idx in range(expected):
+            correct = sentences[idx % total_sentences]
 
-            fallback_questions.append(
+            distractors: List[str] = []
+            for jump in range(1, total_sentences + 1):
+                candidate = sentences[(idx + jump) % total_sentences]
+                if candidate != correct and candidate not in distractors:
+                    distractors.append(candidate)
+                if len(distractors) == 3:
+                    break
+
+            variant = 0
+            while len(distractors) < 3:
+                mutated = mutate(correct, variant)
+                if mutated != correct and mutated not in distractors:
+                    distractors.append(mutated)
+                variant += 1
+
+            base_options = [correct, distractors[0], distractors[1], distractors[2]]
+            order = permutations[idx % len(permutations)]
+            options = [base_options[i] for i in order]
+            correct_index = order.index(0)
+
+            questions.append(
                 {
-                    "question": f"Which statement is directly supported by the provided text? ({len(fallback_questions)+1})",
-                    "options": unique_options,
-                    "correct_answer": "A",
+                    "question": stems[idx % len(stems)],
+                    "options": options,
+                    "correct_answer": ["A", "B", "C", "D"][correct_index],
                 }
             )
 
-        if not fallback_questions:
-            raise RuntimeError("Unable to generate questions from provided content.")
-
-        return fallback_questions[:expected]
+        return questions
