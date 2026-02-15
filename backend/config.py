@@ -21,7 +21,7 @@ HUGGINGFACE_API_URL = os.getenv(
     "HUGGINGFACE_API_URL",
     "https://router.huggingface.co/hf-inference/models",
 )
-HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", "google/flan-t5-base")
+HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", "HuggingFaceTB/SmolLM3-3B")
 HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN", "")
 
 # Quiz settings

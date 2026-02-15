@@ -115,30 +115,64 @@ Source text:
                 "https://router.huggingface.co/hf-inference",
             )
 
-        url = f"{base_url}/{HUGGINGFACE_MODEL}"
+        model = HUGGINGFACE_MODEL.strip().strip("/")
+        chat_url = f"{base_url}/{model}/v1/chat/completions"
+        legacy_url = f"{base_url}/{model}"
         headers = {"Content-Type": "application/json"}
         if HUGGINGFACE_API_TOKEN:
             headers["Authorization"] = f"Bearer {HUGGINGFACE_API_TOKEN}"
 
-        payload: Dict[str, Any] = {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": max(512, num_questions * 180),
-                "temperature": 0.3,
-                "return_full_text": False,
-            },
-        }
-
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=300)
+            # Preferred path: OpenAI-compatible chat endpoint on HF router.
+            chat_payload: Dict[str, Any] = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                "temperature": 0.3,
+                "max_tokens": max(512, num_questions * 180),
+            }
+            resp = requests.post(chat_url, headers=headers, json=chat_payload, timeout=300)
         except Exception as exc:  # pragma: no cover - network error
             raise RuntimeError("Failed to reach Hugging Face inference endpoint.") from exc
+
+        # Fallback for older text-generation style endpoints.
+        if resp.status_code == 404:
+            try:
+                legacy_payload: Dict[str, Any] = {
+                    "inputs": prompt,
+                    "parameters": {
+                        "max_new_tokens": max(512, num_questions * 180),
+                        "temperature": 0.3,
+                        "return_full_text": False,
+                    },
+                }
+                resp = requests.post(
+                    legacy_url,
+                    headers=headers,
+                    json=legacy_payload,
+                    timeout=300,
+                )
+            except Exception as exc:  # pragma: no cover - network error
+                raise RuntimeError("Failed to reach Hugging Face legacy inference endpoint.") from exc
 
         if resp.status_code >= 400:
             detail = resp.text[:500]
             raise RuntimeError(f"Hugging Face API error: {resp.status_code} {detail}")
 
         data = resp.json()
+        if isinstance(data, dict):
+            choices = data.get("choices")
+            if isinstance(choices, list) and choices:
+                first = choices[0]
+                if isinstance(first, dict):
+                    message = first.get("message")
+                    if isinstance(message, dict) and "content" in message:
+                        return str(message["content"])
+
         if isinstance(data, list) and data:
             first = data[0]
             if isinstance(first, dict):

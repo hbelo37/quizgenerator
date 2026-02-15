@@ -95,7 +95,7 @@ Make sure these are set in Railway:
 - `LLM_PROVIDER` - Set to `huggingface` (recommended on Railway) or `ollama`
 - `HUGGINGFACE_API_TOKEN` - Your Hugging Face token (free tier works)
 - `HUGGINGFACE_API_URL` - `https://router.huggingface.co/hf-inference/models`
-- `HUGGINGFACE_MODEL` - Optional model id (default: `google/flan-t5-base`)
+- `HUGGINGFACE_MODEL` - Optional model id (default: `HuggingFaceTB/SmolLM3-3B`)
 - `OLLAMA_BASE_URL` - Only if using Ollama
 
 ---
