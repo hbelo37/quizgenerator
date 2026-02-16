@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import ast
 import re
+import secrets
 import time
 from typing import Any, Dict, List
 
@@ -71,7 +72,12 @@ class LLMService:
             for candidate in candidates:
                 try:
                     parsed = self._parse_questions(candidate, expected=num_questions)
-                    validated = self._validate_questions(parsed, content, expected=num_questions)
+                    validated = self._validate_questions(
+                        parsed,
+                        content,
+                        expected=num_questions,
+                        difficulty=difficulty,
+                    )
                     if len(validated) >= num_questions:
                         return validated[:num_questions]
                     last_error = (
@@ -99,7 +105,7 @@ class LLMService:
         difficulty = difficulty.lower()
         if difficulty == "easy":
             difficulty_instructions = (
-                "Create factual recall questions only. Each answer must appear explicitly in the text."
+                "Create factual recall questions only. Answers should be directly stated in the text."
             )
         elif difficulty == "hard":
             difficulty_instructions = (
@@ -109,6 +115,7 @@ class LLMService:
             difficulty_instructions = (
                 "Create conceptual inference questions that require understanding and light reasoning."
             )
+        variation_key = secrets.token_hex(4)
 
         truncated = content[:6000]
 
@@ -129,6 +136,10 @@ Rules:
 - For HARD: require combining at least two ideas from different parts of the text.
 - All questions must be distinct. Do not repeat the same idea.
 - Avoid generic stems like "Which statement is true?" unless tied to specific context.
+- Vary wording and structure so this quiz differs from previous runs.
+- Humor is allowed only if it naturally fits the source context and should stay light.
+- If context is serious/sensitive, avoid humor completely.
+- INTERNAL VARIATION KEY (do not output): {variation_key}
 
 Return ONLY valid JSON, nothing else. The JSON must have this exact shape:
 {{
@@ -152,6 +163,7 @@ Source text:
         self, content: str, num_questions: int, difficulty: str, retry_hint: str = ""
     ) -> str:
         prompt = self._build_prompt(content, num_questions, difficulty, retry_hint)
+        temperature = self._sampling_temperature(difficulty)
         url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
         try:
             resp = requests.post(
@@ -160,7 +172,7 @@ Source text:
                     "model": OLLAMA_MODEL,
                     "prompt": prompt,
                     "stream": False,
-                    "temperature": 0.7,
+                    "temperature": temperature,
                 },
                 timeout=300,
             )
@@ -179,6 +191,7 @@ Source text:
         self, content: str, num_questions: int, difficulty: str, retry_hint: str = ""
     ) -> str:
         prompt = self._build_prompt(content, num_questions, difficulty, retry_hint)
+        temperature = self._sampling_temperature(difficulty)
         base_url = HUGGINGFACE_API_URL.rstrip("/")
         # Hugging Face migrated from api-inference.huggingface.co to router.huggingface.co.
         if "api-inference.huggingface.co" in base_url:
@@ -204,7 +217,7 @@ Source text:
                         "content": prompt,
                     }
                 ],
-                "temperature": 0.3,
+                "temperature": temperature,
                 "max_tokens": max(512, num_questions * 180),
                 "response_format": {"type": "json_object"},
             }
@@ -219,7 +232,7 @@ Source text:
                     "inputs": prompt,
                     "parameters": {
                         "max_new_tokens": max(512, num_questions * 180),
-                        "temperature": 0.3,
+                        "temperature": temperature,
                         "return_full_text": False,
                     },
                 }
@@ -271,7 +284,7 @@ Source text:
         return self._call_groq_chat(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
-            temperature=0.3,
+            temperature=self._sampling_temperature(difficulty),
         )
 
     def _parse_questions(self, raw: str, expected: int) -> List[Dict[str, Any]]:
@@ -337,7 +350,11 @@ Source text:
         return normalised[:expected]
 
     def _validate_questions(
-        self, questions: List[Dict[str, Any]], content: str, expected: int
+        self,
+        questions: List[Dict[str, Any]],
+        content: str,
+        expected: int,
+        difficulty: str,
     ) -> List[Dict[str, Any]]:
         content_lower = content.lower()
         seen_question_keys = set()
@@ -369,6 +386,9 @@ Source text:
             if tokens and (len(overlap) / len(tokens)) < 0.35:
                 continue
 
+            if not self._matches_difficulty(question, difficulty):
+                continue
+
             validated.append(
                 {
                     "question": question,
@@ -380,6 +400,28 @@ Source text:
                 break
 
         return validated
+
+    def _sampling_temperature(self, difficulty: str) -> float:
+        d = (difficulty or "medium").lower().strip()
+        if d == "easy":
+            return 0.55
+        if d == "hard":
+            return 0.5
+        return 0.6
+
+    def _matches_difficulty(self, question: str, target: str) -> bool:
+        q = question.lower()
+        target = (target or "medium").lower().strip()
+        if target == "easy":
+            disallowed = ("most likely", "best explains", "implies", "inference", "synthesize")
+            return not any(term in q for term in disallowed)
+        if target == "hard":
+            required_any = ("most likely", "best explains", "implies", "inference", "synthesis", "combined")
+            return any(term in q for term in required_any) or len(q.split()) >= 12
+        # medium
+        if any(term in q for term in ("synthesis", "combined", "multi-step")):
+            return False
+        return len(q.split()) >= 8
 
     def _normalise_options(self, raw_options: Any) -> List[str]:
         if raw_options is None:
