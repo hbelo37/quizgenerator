@@ -16,7 +16,7 @@ Built a tool that converts notes into MCQs using LLM APIs.
 - Instant scoring
 
 ## Tech Stack
-React + Node + OpenAI API (or whatever you're using)
+React + Node + GROQ API
 
 ## Product Decisions
 - Chose MCQ over subjective for faster validation
@@ -25,10 +25,6 @@ React + Node + OpenAI API (or whatever you're using)
 ## Future Improvements
 - Adaptive difficulty
 - Analytics dashboard
-
-## Free MCQ Quiz Generator
-
----
 
 ## Project structure
 
