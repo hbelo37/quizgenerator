@@ -1,17 +1,32 @@
+# AI Quiz Generator
+
+## Problem
+Students are tired of passive revision and want active recall-based testing.
+
+## Solution
+Built a tool that converts notes into MCQs using LLM APIs.
+
+## Target User
+12th-grade students preparing for board exams.
+
+## Features
+- Upload notes
+- Auto-generate MCQs
+- Difficulty control
+- Instant scoring
+
+## Tech Stack
+React + Node + OpenAI API (or whatever you're using)
+
+## Product Decisions
+- Chose MCQ over subjective for faster validation
+- Kept UI minimal to reduce cognitive load
+
+## Future Improvements
+- Adaptive difficulty
+- Analytics dashboard
+
 ## Free MCQ Quiz Generator
-
-A completely free, local‑first web app that:
-
-- **Extracts text** from PDFs or websites using an open‑source `LangExtract` module
-- **Generates MCQ quizzes** with a local LLM (Ollama, e.g. `mistral` / `llama3`)
-- **Stores quizzes in SQLite** with shareable quiz IDs
-- **Runs entirely on localhost** – no paid APIs or cloud services
-
-### Tech stack
-
-- **Backend**: Python, FastAPI, SQLite, local `LangExtract` (PDF + URL)
-- **LLM**: Ollama running a free local model (e.g. `mistral`, `llama3`)
-- **Frontend**: HTML + CSS + vanilla JS (Fetch API)
 
 ---
 
